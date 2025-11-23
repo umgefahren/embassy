@@ -364,6 +364,26 @@ impl<'d> Future for InputFuture<'d> {
     }
 }
 
+impl<'d> Drop for InputFuture<'d> {
+    fn drop(&mut self) {
+        // When the future is dropped (cancelled), we need to clear all interrupt
+        // enables for this pin to ensure cancellation safety. This prevents:
+        // 1. Spurious interrupts from firing after cancellation
+        // 2. Edge events from being "consumed" during cancellation windows
+        // 3. Hardware state inconsistency between cancelled and fresh futures
+        let pin_group = (self.pin.pin() % 8) as usize;
+        self.pin
+            .int_proc()
+            .inte((self.pin.pin() / 8) as usize)
+            .write_clear(|w| {
+                w.set_edge_high(pin_group, true);
+                w.set_edge_low(pin_group, true);
+                w.set_level_high(pin_group, true);
+                w.set_level_low(pin_group, true);
+            });
+    }
+}
+
 /// GPIO output driver.
 #[derive(Debug)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
